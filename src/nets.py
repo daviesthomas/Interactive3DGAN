@@ -3,6 +3,7 @@ import torch.nn as nn
 
 import torchsummary
 
+
 # direct implementation of: http://3dgan.csail.mit.edu/papers/3dgan_nips.pdf
 class Generator(torch.nn.Module):
     def __init__(self, latentSize=200, leak=0.0):
@@ -49,34 +50,34 @@ class Generator(torch.nn.Module):
         return self.model(x)
 
 class Discriminator(torch.nn.Module):
-    def __init__(self, voxelSize = 64):
+    def __init__(self, voxelSize = 64, dropoutRate=0.0):
         super(Discriminator, self).__init__()
 
         self.useLeakyRelu = True
         self.leak = 0.2
-        self.dropoutRate = 0.5
+        self.dropoutRate = dropoutRate
         self.voxelSize = 64
 
         self.model = nn.Sequential(
             nn.Conv3d(1, 64, 4, 2 ,1),
             self._normalization(64),
             self._activation(),
-            nn.Dropout3d(0.5),
+            #nn.Dropout3d(self.dropoutRate),
 
             nn.Conv3d(64, 128, 4, 2, 1),
             self._normalization(128),
             self._activation(),
-            nn.Dropout3d(0.5),
+            #nn.Dropout3d(0.5),
 
             nn.Conv3d(128, 256, 4, 2, 1),
             self._normalization(256),
             self._activation(),
-            nn.Dropout3d(0.5),
+            #nn.Dropout3d(0.5),
 
             nn.Conv3d(256, 512, 4, 2, 1),
             self._normalization(512),
             self._activation(),
-            nn.Dropout3d(0.5),
+            #nn.Dropout3d(0.5),
 
             nn.Conv3d(512, 1, 4, 2, 0),
             nn.Sigmoid(),
