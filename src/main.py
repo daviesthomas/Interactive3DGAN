@@ -11,12 +11,14 @@ from trainer import GAN3DTrainer
 
 def main():
     argparser = argparse.ArgumentParser(description='Implementation of interactive 3d modelling with GANs!')
-    argparser.add_argument('--mode','-m',type=str, choices=['trainGAN','testGAN','trainPROJ','play'], required=True)
-    argparser.add_argument('--resume', type=int, default=1)
+    argparser.add_argument('--mode','-m',type=str, choices=['trainGAN','testGAN','trainPROJ','viewData','play'], required=True)
+    argparser.add_argument('--resume', action='store_true')
     argparser.add_argument('--shapenetMeshPath', '-mp', type=str, default='/raid/thomas/data/meshDatasets/shapenet/ShapeNetCore.v1')
     argparser.add_argument('--shapenetVoxelPath','-vp', type=str, default='/raid/thomas/data/meshDatasets/shapenet/ShapeNetCore.v1.Voxels')
     argparser.add_argument('--logPath', '-l', type=str, default='/raid/thomas/InteractiveGANExperiments/base3DGAN')
     argparser.add_argument('--batchSize', '-bs', type=int, default=50)
+    argparser.add_argument('--logEvery', type=int, default=10)
+    argparser.add_argument('--saveEvery', type=int, default=10)
     argparser.add_argument('--epochs', '-e', type=int, default=40)
     
     args = argparser.parse_args()
@@ -41,13 +43,15 @@ def main():
         if (args.mode == 'trainGAN'):  
             trainer = GAN3DTrainer(
                 logDir = args.logPath,
-                printEvery=1, 
+                printEvery=args.logEvery, 
                 resume=args.resume
             )
         
         for epoch in range(args.epochs):
             trainer.train(trainDataLoader)
-            trainer.save()
+
+            if epoch % args.saveEvery == 0:
+                trainer.save()
 
     elif (args.mode == 'testGAN'):
         G = Generator().to(device)
@@ -67,7 +71,34 @@ def main():
             model = kal.transforms.voxelfunc.max_connected(model, 0.5)
             verts, faces = kal.conversions.voxelgrid_to_quadmesh(model)
             mesh = kal.rep.QuadMesh.from_tensors(verts,faces)
-            mesh.laplacian_smoothing(iterations=3)
+            #mesh.laplacian_smoothing(iterations=3)
             mesh.show()
+    elif (args.mode == 'viewData'):
+        trainDataSet = kal.datasets.shapenet.ShapeNet_Voxels(
+            args.shapenetMeshPath,
+            args.shapenetVoxelPath,
+            categories=['chair'],
+            resolutions=[62]    # we default to 64 voxel size
+        )
+
+        trainDataLoader = torch.utils.data.DataLoader(
+            trainDataSet, 
+            batch_size= args.batchSize, 
+            shuffle=True, 
+            num_workers=8
+        )
+
+        for i,sample in enumerate(trainDataLoader):
+            shapes = sample['data']['62']
+
+            for voxels in shapes:
+                voxels = voxels[:-2,:-2,:-2]
+
+                model = kal.transforms.voxelfunc.max_connected(voxels, 0.5)
+                verts, faces = kal.conversions.voxelgrid_to_quadmesh(model)
+                mesh = kal.rep.QuadMesh.from_tensors(verts,faces)
+                #mesh.laplacian_smoothing(iterations=3)
+                mesh.show()
+
 
 main()
