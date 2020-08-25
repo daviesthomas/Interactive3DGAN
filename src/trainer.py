@@ -6,16 +6,18 @@ from tqdm import tqdm
 import pickle 
 
 import kaolin as kal 
+from torch.utils.tensorboard import SummaryWriter
 
-from nets import Generator, Discriminator
+from nets import Generator, Discriminator, Projector
 
 class GAN3DTrainer(object):
-    def __init__(self, logDir, printEvery=1, resume=False):
+    def __init__(self, logDir, printEvery=1, resume=False, useTensorboard=True):
         super(GAN3DTrainer, self).__init__()
 
         self.logDir = logDir
 
         self.currentEpoch = 0
+        self.totalBatches = 0
 
         self.trainStats = {
             'lossG': [],
@@ -55,6 +57,13 @@ class GAN3DTrainer(object):
 
         if resume:
             self.load()
+
+        self.useTensorboard = useTensorboard
+        self.tensorGraphInitialized = False
+        self.writer = None
+        if useTensorboard:
+            self.writer = SummaryWriter(os.path.join(self.logDir,'tensorboard'))
+
     
     def train(self, trainData : torch.utils.data.DataLoader):
         epochLoss = 0.0
@@ -98,11 +107,13 @@ class GAN3DTrainer(object):
             # gen train
             z = torch.normal(
                 torch.zeros(data['62'].shape[0], 200), 
-                torch.ones(data['62'].shape[0],200) * 0.33
+                torch.ones(data['62'].shape[0], 200) * 0.33
             ).to(self.device)
 
             fakeVoxels = self.G(z)
             fakeD = self.D(fakeVoxels)
+
+            # https://arxiv.org/pdf/1706.05170.pdf (IV. Methods, A. Training the gen model)
             lossG = -torch.mean(torch.log(fakeD))
 
             self.D.zero_grad()
@@ -116,13 +127,26 @@ class GAN3DTrainer(object):
                 tqdm.write(f'[TRAIN] Epoch {self.currentEpoch:03d}, Batch {i:03d}: '
                            f'gen: {float(accG.item()):2.3f}, dis = {float(accD.item()):2.3f}')
                 
-                #self.trainStats['lossG'].append(lossG.to(torch.device('cpu')))
-                #self.trainStats['lossD'].append(lossD.to(torch.device('cpu')))
-                #self.trainStats['accG'].append(accG.to(torch.device('cpu')))
-                #self.trainStats['accD'].append(accD.to(torch.device('cpu')))
+                self.writer.add_scalar('GenLoss/train', lossG, numBatches + self.totalBatches)
+                self.writer.add_scalar('DisLoss/train', lossD, numBatches + self.totalBatches)
+                self.writer.add_scalar('GenAcc/train', accG, numBatches + self.totalBatches)
+                self.writer.add_scalar('DisAcc/train', accD, numBatches + self.totalBatches)
+                self.writer.flush()
+
+            if self.useTensorboard and not self.tensorGraphInitialized:   
+                #TODO: why can't I push graph? 
+                #tempZ = torch.autograd.Variable(torch.rand(data['62'].shape[0],200,1,1,1)).cuda(1)             
+                #self.writer.add_graph(self.G, tempZ)
+                #self.writer.flush()
+
+                #self.writer.add_graph(self.D, fakeVoxels)
+                #self.writer.flush()
+                
+                self.tensorGraphInitialized = True
 
         #self.trainLoss.append(epochLoss)
         self.currentEpoch += 1
+        self.totalBatches += numBatches
 
     def save(self):
         logTable = {
@@ -158,5 +182,45 @@ class GAN3DTrainer(object):
         )
 
         self.currentEpoch = runData['epoch']
+
+#essentially training as an Autoencoder with fixed decoder
+class ProjectorTrainer(object):
+    def __init__(self, logDir, printEvery=1, resume=False):
+        super().__init__()
+
+        self.P = Projector()
+        self.G = Generator()    # frozen. Note Trained.
+
+        self.device = torch.device('cpu')
+        if torch.cuda.is_available():
+            self.device = torch.device('cuda:0')
+
+            self.G = self.G.to(self.device)
+            self.P = self.P.to(self.device)
+
+            # parallelize models on both devices, splitting input on batch dimension
+            self.G = torch.nn.DataParallel(self.G, device_ids=[0,1])
+            self.P = torch.nn.DataParallel(self.P, device_ids=[0,1])
+
+        self.optim = torch.optim.Adam(
+            self.P.parameters(), 
+            lr=0.00005, 
+            betas= (0.5,0.999)
+        )
+
+        if resume:
+            self.load()
+
+    def train(self, trainData):
+        self.P.train()
+
+        for i, sample in enumerate(tqdm(trainData)):
+            data = sample['data']
+
+            self.optim.zero_grad()
+            self.P.zero_grad()
+
+
+
 
         
