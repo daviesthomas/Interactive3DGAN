@@ -12,11 +12,11 @@ from trainer import GAN3DTrainer
 def main():
     argparser = argparse.ArgumentParser(description='Implementation of interactive 3d modelling with GANs!')
     argparser.add_argument('--mode','-m',type=str, choices=['trainGAN','testGAN','trainPROJ','play'], required=True)
-    argparser.add_argument('--softStart', type=bool, default=True)
+    argparser.add_argument('--resume', type=int, default=1)
     argparser.add_argument('--shapenetMeshPath', '-mp', type=str, default='/raid/thomas/data/meshDatasets/shapenet/ShapeNetCore.v1')
     argparser.add_argument('--shapenetVoxelPath','-vp', type=str, default='/raid/thomas/data/meshDatasets/shapenet/ShapeNetCore.v1.Voxels')
     argparser.add_argument('--logPath', '-l', type=str, default='/raid/thomas/InteractiveGANExperiments/base3DGAN')
-    argparser.add_argument('--batchSize', '-bs', type=int, default=16)
+    argparser.add_argument('--batchSize', '-bs', type=int, default=50)
     argparser.add_argument('--epochs', '-e', type=int, default=40)
     
     args = argparser.parse_args()
@@ -42,14 +42,14 @@ def main():
             trainer = GAN3DTrainer(
                 logDir = args.logPath,
                 printEvery=1, 
-                resume=args.softStart
+                resume=args.resume
             )
         
         for epoch in range(args.epochs):
             trainer.train(trainDataLoader)
             trainer.save()
 
-    elif (args.mode == 'test'):
+    elif (args.mode == 'testGAN'):
         G = Generator().to(device)
         G = torch.nn.DataParallel(G, device_ids=[0,1])
 
