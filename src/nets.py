@@ -58,27 +58,37 @@ class Discriminator(torch.nn.Module):
         self.dropoutRate = dropoutRate
         self.voxelSize = 64
 
-        self.model = nn.Sequential(
+        self.model = {}
+
+        self.layer1 = nn.Sequential(
             nn.Conv3d(1, 64, 4, 2 ,1),
             self._normalization(64),
             self._activation(),
-            #nn.Dropout3d(self.dropoutRate),
+            #nn.Dropout3d(self.dropoutRate)
+        )
 
+        self.layer2 = nn.Sequential(
             nn.Conv3d(64, 128, 4, 2, 1),
             self._normalization(128),
             self._activation(),
             #nn.Dropout3d(0.5),
+        )
 
+        self.layer3 = nn.Sequential(
             nn.Conv3d(128, 256, 4, 2, 1),
             self._normalization(256),
             self._activation(),
             #nn.Dropout3d(0.5),
+        )
 
+        self.layer4 = nn.Sequential(
             nn.Conv3d(256, 512, 4, 2, 1),
             self._normalization(512),
             self._activation(),
             #nn.Dropout3d(0.5),
+        )
 
+        self.outputLayer = nn.Sequential(
             nn.Conv3d(512, 1, 4, 2, 0),
             nn.Sigmoid(),
         )
@@ -91,8 +101,26 @@ class Discriminator(torch.nn.Module):
 
     def forward(self, x):
         x = x.view(-1, 1, self.voxelSize, self.voxelSize, self.voxelSize)
-        y = self.model(x)
+        
+        h = self.layer1(x)
+        h = self.layer2(h)
+        h = self.layer3(h)
+        h = self.layer4(h)
+        y = self.outputLayer(h)
+
         return y.view(-1, y.size(1))
+
+    ''' Exposes internal layer output through pytorch hook.
+         Activations pushed to self.activations. Users responsible for clearing!'''
+    def attachLayerHook(self, layer):
+        self.activations = []
+
+        def hook(module, input, output):
+            self.activations.append(output)
+
+        layer[-1].register_forward_hook(hook)
+
+
 
 # direct implementation of: https://arxiv.org/pdf/1706.05170.pdf
 class Projector(torch.nn.Module):
@@ -132,6 +160,7 @@ class Projector(torch.nn.Module):
         return nn.ReLU() if not self.useLeakyRelu else nn.LeakyReLU(self.leak)
 
     def forward(self, x):
+        x = x.view(-1, 1, self.voxelSize, self.voxelSize, self.voxelSize)
         y = self.model(x)
         return y.view(-1, y.size(1))
 
@@ -170,3 +199,31 @@ if __name__ == "__main__":
     torchsummary.summary(D, (1, 64, 64, 64))
     print("######## PROJECTOR SUMMARY ########")
     torchsummary.summary(P, (1, 64, 64, 64))
+
+    D.module.attachLayerHook(D.module.layer3)
+
+    D_a = D(X)
+    D_b = D(X)
+
+    realismLoss = -torch.mean(torch.log(D_a) + torch.log(1. - D_b))
+    
+    ### Dissimilarity loss
+
+    # Fetch layer 3 activations ("We specifically
+    # select the output of the 256 × 8 × 8 × 8 layer")
+    acts = self.D.module.activations
+
+    # NOTE: assumes 2 GPUs...
+    actGen = torch.nn.parallel.gather(acts[:2], 'cuda:0')
+    actReal = torch.nn.parallel.gather(acts[-2:], 'cuda:0')
+    self.D.module.activations = []
+
+    dissimilarityLoss = torch.abs(actGen - actReal)
+    
+    loss = dissimilarityLoss*(1.0 - self.lossRatio) + realismLoss*(self.lossRatio) 
+
+    print(actA.shape, actB.shape)
+
+
+
+
